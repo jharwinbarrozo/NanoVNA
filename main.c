@@ -140,42 +140,48 @@ static void cmd_reset(BaseSequentialStream *chp, int argc, char *argv[])
       ;
 }
 
+#define DELAY_ON_GAIN_CHANGE 3
+
 int set_frequency(int freq)
 {
-    int delay = 0;
+    bool gain_changed = false;
     if (frequency == freq)
-      return delay;
+      return 0;
 
     if (freq > 1400000000 && frequency <= 1400000000) {
       tlv320aic3204_set_gain(95, 95);
-      delay += 10;
+      gain_changed = true;
     } else
     if (freq > 1200000000 && frequency <= 1200000000) {
       tlv320aic3204_set_gain(85, 85);
-      delay += 10;
+      gain_changed = true;
     } else
     if (freq > 900000000 && frequency <= 900000000) {
       tlv320aic3204_set_gain(75, 75);
-      delay += 10;
+      gain_changed = true;
     } else
     if (freq > 600000000 && frequency <= 600000000) {
       tlv320aic3204_set_gain(50, 50);
-      delay += 10;
+      gain_changed = true;
     } else
     if (freq > FREQ_HARMONICS && frequency <= FREQ_HARMONICS) {
       tlv320aic3204_set_gain(40, 40);
-      delay += 10;
+      gain_changed = true;
     } else
     if (freq <= FREQ_HARMONICS && frequency > FREQ_HARMONICS) {
       tlv320aic3204_set_gain(0, 0);
-      delay += 10;
+      gain_changed = true;
     }
 
     int8_t ds = drive_strength;
     if (ds == DRIVE_STRENGTH_AUTO) {
       ds = freq > FREQ_HARMONICS ? SI5351_CLK_DRIVE_STRENGTH_8MA : SI5351_CLK_DRIVE_STRENGTH_2MA;
     }
-    delay += si5351_set_frequency_with_offset(freq, frequency_offset, ds);
+
+    int delay = si5351_set_frequency_with_offset(freq, frequency_offset, ds);
+    if (gain_changed && delay < DELAY_ON_GAIN_CHANGE) {
+      delay = DELAY_ON_GAIN_CHANGE;
+    }
 
     frequency = freq;
     return delay;
@@ -552,6 +558,8 @@ static void cmd_scan(BaseSequentialStream *chp, int argc, char *argv[])
 }
 #endif
 
+#define DELAY_CHANNEL_CHANGE 1
+
 // main loop for measurement
 void sweep(void)
 {
@@ -560,11 +568,10 @@ void sweep(void)
 
  rewind:
   frequency_updated = FALSE;
-  //delay = 3;
 
   for (i = 0; i < sweep_points; i++) {
-    delay = set_frequency(frequencies[i]);
     tlv320aic3204_select_in3(); // CH0:REFLECT
+    delay = set_frequency(frequencies[i]);
     wait_dsp(delay);
 
     // blink LED while scanning
@@ -574,7 +581,7 @@ void sweep(void)
     (*sample_func)(measured[0][i]);
 
     tlv320aic3204_select_in1(); // CH1:TRANSMISSION
-    wait_dsp(delay);
+    wait_dsp(delay + DELAY_CHANNEL_CHANGE);
 
     /* calculate transmission coeficient */
     (*sample_func)(measured[1][i]);
